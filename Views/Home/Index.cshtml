@@ -1,0 +1,383 @@
+﻿@{
+    ViewData["Title"] = "Home Page";
+}
+<div id="drop-area" class="mb-4">
+    <p>Drag and drop a PDF file here</p>
+</div>
+<div id="output" class="flex-grow mb-4"></div>
+<div id="feedbackLabel" class="text-center mb-2"></div>
+
+
+<footer class="mt-auto">
+    <div class="flex flex-col justify-center items-center bg-background text-primary-foreground p-4">
+        <select id="language-select" class="w-40 sm:w-64 h-10 sm:h-12 px-2 sm:px-4 py-1 sm:py-2 mb-2 sm:mb-4 bg-input text-primary-foreground rounded-lg focus:outline-none">
+            <option value="en-US">English (US)</option>
+            <option value="es-ES">Spanish (Spain)</option>
+            <option value="fr-FR">French (France)</option>
+            <option value="ar-SA">Arabic (Saudi Arabia)</option>
+        </select>
+        <input id="result" type="text" placeholder="Speak here..." class="w-40 sm:w-64 h-10 sm:h-12 px-2 sm:px-4 py-1 sm:py-2 mb-2 sm:mb-4 bg-input text-primary-foreground rounded-lg focus:outline-none" />
+        <button id="micButton" class="w-12 sm:w-16 h-12 sm:h-16 flex justify-center items-center bg-primary text-primary-foreground rounded-full shadow-lg transition-colors duration-300 ease-in-out">
+            <img src="/images/musical.png" alt="microphone" class="w-4 sm:w-6 h-4 sm:h-6" />
+        </button>
+    </div>
+</footer>
+
+<!-- Add Tesseract.js from CDN -->
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js"></script>
+
+<script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+
+    const dropArea = document.getElementById('drop-area');
+    const output = document.getElementById('output');
+    const micButton = document.getElementById('micButton');
+    const feedbackLabel = document.getElementById('feedbackLabel');
+    const resultInput = document.getElementById('result');
+    const languageSelect = document.getElementById('language-select');
+    let pdfText = '';
+    let recognition;
+    let isRecording = false;
+    let micPermissionGranted = false;
+
+    // PDF drag and drop functionality
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+        dropArea.addEventListener(eventName, preventDefaults, false);
+    });
+
+
+    function preventDefaults(e) {
+        e.preventDefault();
+        e.stopPropagation();
+    }
+
+    ['dragenter', 'dragover'].forEach(eventName => {
+        dropArea.addEventListener(eventName, () => dropArea.classList.add('highlight'), false);
+    });
+
+    ['dragleave', 'drop'].forEach(eventName => {
+        dropArea.addEventListener(eventName, () => dropArea.classList.remove('highlight'), false);
+    });
+
+    dropArea.addEventListener('drop', handleDrop, false);
+
+    function handleDrop(e) {
+        const file = e.dataTransfer.files[0];
+        handleFile(file);
+    }
+
+    function handleFile(file) {
+        const fileType = file.type;
+
+        if (fileType === 'application/pdf') {
+            // Handle PDF file
+            const reader = new FileReader();
+            reader.onload = function (event) {
+                const typedarray = new Uint8Array(event.target.result);
+                extractText(typedarray);
+            };
+            reader.readAsArrayBuffer(file);
+        } else if (fileType.startsWith('image/')) {
+            // Handle image file (JPG, PNG, etc.)
+            const reader = new FileReader();
+            reader.onload = function (event) {
+                const imageDataURL = event.target.result;
+                extractTextFromImage(imageDataURL); // Use the same Tesseract extraction
+            };
+            reader.readAsDataURL(file); // Read the image as a data URL
+        } else {
+            alert('Unsupported file type. Please upload a PDF or image file.');
+        }
+    }
+
+
+    function extractText(typedarray) {
+        pdfjsLib.getDocument(typedarray).promise.then(function (pdf) {
+            let promises = [];
+            for (let i = 1; i <= pdf.numPages; i++) {
+                promises.push(processPage(pdf, i));
+            }
+            Promise.all(promises).then(function (pageTexts) {
+                pdfText = pageTexts.join(' ');
+                displayHiddenText(pdfText);
+            });
+        });
+    }
+
+    function processPage(pdf, pageNum) {
+        return pdf.getPage(pageNum).then(function (page) {
+            const viewport = page.getViewport({ scale: 2 });
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            canvas.height = viewport.height;
+            canvas.width = viewport.width;
+
+            return page.render({ canvasContext: context, viewport: viewport }).promise.then(function () {
+                const imageDataURL = canvas.toDataURL();
+                return extractTextFromImage(imageDataURL);
+            });
+        });
+    }
+
+    function extractTextFromImage(imageDataURL) {
+        return Tesseract.recognize(
+            imageDataURL,
+            languageSelect.value === 'ar-SA' ? 'ara' : 'eng', // Language selection
+            {
+                logger: info => console.log(info) // Optional logging
+            }
+        ).then(({ data: { text } }) => {
+            displayHiddenText(text); // Show the extracted text
+            return text;
+        });
+    }
+
+    function displayHiddenText(text) {
+        // Normalize the PDF text before displaying it
+        const normalizedText = normalizeText(text);
+        const words = normalizedText.match(/\S+/g) || [];
+        output.innerHTML = words.map(word => `<span class="hidden-word">${word}</span>`).join(' ');
+        output.dir = isRTL(normalizedText) ? 'rtl' : 'ltr';
+    }
+
+    function isRTL(text) {
+        const rtlChars = /[\u0591-\u07FF\uFB1D-\uFDFD\uFE70-\uFEFC]/;
+        return rtlChars.test(text);
+    }
+
+    // Function to normalize Arabic text (remove diacritics and normalize characters)
+    function normalizeText(text) {
+        return text
+            // Remove special characters
+            .replace(/[-*_:(;)|?!&.؟]/g, '')
+            // Remove extra spaces caused by special characters
+            .replace(/\s{2,}/g, ' ')
+            .trim()
+            // Remove Arabic diacritics and normalize Arabic text
+            .replace(/[\u064B-\u065F]/g, '')
+            .replace(/(أ|إ|آ)/g, 'ا')
+            .replace(/ة/g, 'ه')
+            .replace(/ى/g, 'ي')
+            .replace(/ؤ/g, 'و')
+            .replace(/ئ/g, 'ي');
+    }
+
+    // Function to compare normalized texts
+    function normalizeArabicTextComparison(spokenText, targetText) {
+        const normalizedSpoken = normalizeText(spokenText.toLowerCase());
+        const normalizedTarget = normalizeText(targetText.toLowerCase());
+
+        return normalizedSpoken.includes(normalizedTarget);
+    }
+
+    // Updated voice recognition functionality
+    if ('webkitSpeechRecognition' in window) {
+        recognition = new webkitSpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+
+        recognition.onresult = function (event) {
+            const result = event.results[event.results.length - 1];
+            if (result.isFinal) {
+                const spokenText = result.item(0).transcript;
+                resultInput.value = spokenText;
+                revealMatchingWords(spokenText);
+            }
+        };
+
+        recognition.onend = function () {
+            if (isRecording) {
+                recognition.start();
+            }
+        };
+        recognition.onstart = function () {
+            isRecording = true;
+            clearTimeout(inactivityTimer);
+        };
+        languageSelect.addEventListener('change', (event) => {
+            recognition.lang = event.target.value;
+        });
+
+        function startRecognition() {
+            if (!micPermissionGranted) {
+                navigator.mediaDevices.getUserMedia({ audio: true })
+                    .then(function (stream) {
+                        micPermissionGranted = true;
+                        stream.getTracks().forEach(track => track.stop());
+                        startRecognitionAfterPermission();
+                    })
+                    .catch(function (error) {
+                        console.error('Error accessing microphone:', error);
+                        alert('Microphone access is required for speech recognition.');
+                    });
+            } else {
+                startRecognitionAfterPermission();
+            }
+        }
+
+        function startRecognitionAfterPermission() {
+            if (!isRecording) {  // Ensure recognition is not already started
+                recognition.start();
+                isRecording = true;
+                updateMicButtonState();
+                clearTimeout(inactivityTimer);
+            }
+        }
+
+        function stopRecognition() {
+            recognition.stop();
+            isRecording = false;
+            updateMicButtonState();
+            resetInactivityTimer();
+        }
+
+        function updateMicButtonState() {
+            if (isRecording) {
+                micButton.classList.add('bg-red-500');
+                feedbackLabel.textContent = 'Listening...';
+            } else {
+                micButton.classList.remove('bg-red-500');
+                feedbackLabel.textContent = '';
+            }
+        }
+
+        micButton.addEventListener('mousedown', startRecognition);
+        micButton.addEventListener('mouseup', stopRecognition);
+        micButton.addEventListener('mouseleave', stopRecognition);
+        micButton.addEventListener('touchstart', function (e) {
+            e.preventDefault();
+            startRecognition();
+        });
+        micButton.addEventListener('touchend', stopRecognition);
+    } else {
+        micButton.style.display = 'none';
+        alert('Web Speech API is not supported in this browser.');
+    }
+
+    let lastRevealedIndex = -1; // Track the last revealed index
+
+    function revealMatchingWords(spokenText) {
+        const spokenWords = normalizeText(spokenText.toLowerCase()).match(/\S+/g) || [];
+        const spans = output.getElementsByTagName('span');
+        const maxSearchRange = 10; // Maximum number of words to search ahead
+
+        // Find the best matching phrase in the text, starting from lastRevealedIndex
+        let bestMatchStartIndex = -1;
+        let bestMatchCount = 0;
+
+        const searchEndIndex = Math.min(lastRevealedIndex + 1 + maxSearchRange, spans.length);
+
+        for (let i = lastRevealedIndex + 1; i < searchEndIndex; i++) {
+            let matchCount = 0;
+            const matchedWords = new Set();
+            for (let j = 0; j < spokenWords.length && i + j < spans.length; j++) {
+                const normalizedSpanText = normalizeText(spans[i + j].textContent.toLowerCase());
+                for (let k = 0; k < spokenWords.length; k++) {
+                    const normalizedSpokenWord = normalizeText(spokenWords[k]);
+                    if (normalizedSpanText === normalizedSpokenWord && !matchedWords.has(k)) {
+                        matchCount++;
+                        matchedWords.add(k);
+                        break;
+                    }
+                }
+            }
+            if (matchCount > bestMatchCount) {
+                bestMatchCount = matchCount;
+                bestMatchStartIndex = i;
+            }
+        }
+
+        // If a match is found within the search range, reveal the phrase and any forgotten words
+        if (bestMatchStartIndex !== -1) {
+            // Reveal forgotten words between last revealed word and current phrase
+            for (let i = lastRevealedIndex + 1; i < bestMatchStartIndex; i++) {
+                const span = spans[i];
+                span.classList.remove('hidden-word');
+                span.classList.add('gap');
+                span.classList.remove('revealed');
+            }
+
+            let revealedCount = 0;
+            const spokenWordsSet = new Set(spokenWords.map(word => normalizeText(word.toLowerCase())));
+            for (let i = 0; i < spokenWords.length && bestMatchStartIndex + i < spans.length; i++) {
+                const span = spans[bestMatchStartIndex + i];
+                span.classList.remove('hidden-word');
+                const normalizedSpanText = normalizeText(span.textContent.toLowerCase());
+                if (spokenWordsSet.has(normalizedSpanText)) {
+                    span.classList.add('revealed');
+                    span.classList.remove('gap');
+                    revealedCount++;
+                    spokenWordsSet.delete(normalizedSpanText); // Prevent duplicate matches
+                } else {
+                    span.classList.add('gap');
+                    span.classList.remove('revealed');
+                }
+            }
+
+            // Update lastRevealedIndex to the last revealed word within the current phrase
+            lastRevealedIndex = bestMatchStartIndex + revealedCount - 1;
+        } else {
+            // No match found within the search range
+            console.log("No matching phrase found within the search range");
+        }
+        hasSpokenFirstPhrase = true;
+        resetInactivityTimer();
+    }
+
+
+    
+    let lastActivityTime = Date.now();
+    let inactivityTimer;
+    let hasSpokenFirstPhrase = false;
+
+    function startInactivityTimer() {
+        clearTimeout(inactivityTimer);
+        inactivityTimer = setTimeout(handleInactivity, 10000); // 5 seconds
+    }
+
+    function resetInactivityTimer() {
+        lastActivityTime = Date.now();
+        clearTimeout(inactivityTimer);
+        if (hasSpokenFirstPhrase && !isRecording) {
+            startInactivityTimer();
+        }
+    }
+
+    function handleInactivity() {
+        if (!hasSpokenFirstPhrase || isRecording) {
+            startInactivityTimer();
+            return;
+        }
+
+        const spans = output.getElementsByTagName('span');
+        let revealedCount = 0;
+        let wordsToSpeak = [];
+
+        for (let i = lastRevealedIndex + 1; i < spans.length && revealedCount < 2; i++) {
+            const span = spans[i];
+            if (span.classList.contains('hidden-word')) {
+                span.classList.remove('hidden-word');
+                span.classList.add('revealed');
+                wordsToSpeak.push(span.textContent);
+                revealedCount++;
+                lastRevealedIndex = i;
+            }
+        }
+
+        if (wordsToSpeak.length > 0) {
+            speakWords(wordsToSpeak.join(' '));
+        }
+
+        startInactivityTimer();
+    }
+
+    function speakWords(text) {
+        if (!isRecording) {
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = languageSelect.value;
+            speechSynthesis.speak(utterance);
+        }
+    }
+</script>
+
+

@@ -1,0 +1,60 @@
+html {
+  font-size: 14px;
+}
+
+@media (min-width: 768px) {
+  html {
+    font-size: 16px;
+  }
+}
+
+.btn:focus, .btn:active:focus, .btn-link.nav-link:focus, .form-control:focus, .form-check-input:focus {
+  box-shadow: 0 0 0 0.1rem white, 0 0 0 0.25rem #258cfb;
+}
+
+html {
+  position: relative;
+  min-height: 100%;
+}
+
+body {
+    margin-bottom: 60px;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    font-family: Arial, sans-serif;
+}
+
+#drop-area {
+    border: 2px dashed #ccc;
+    border-radius: 20px;
+    padding: 20px;
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+    #drop-area.highlight {
+        border-color: purple;
+    }
+
+#output {
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    padding: 10px;
+    border: 1px solid #ccc;
+    flex-grow: 1;
+    overflow-y: auto;
+}
+
+.hidden-word {
+    opacity: 0;
+}
+
+.revealed {
+    opacity: 1;
+    color:lawngreen;
+    transition: opacity 0.5s ease;
+}
+.gap {
+    color: red;
+}
